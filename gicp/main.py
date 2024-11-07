@@ -1,10 +1,12 @@
 import numpy as np
 import open3d as o3d
 from GICP.registeration import GICP
+from scipy.spatial.transform import Rotation as R
+
 def create_sample_point_clouds():
     # Generate a random target point cloud
     target_cloud = o3d.geometry.PointCloud()
-    target_points = np.random.uniform(-1, 1, (200, 3))  # 100 random points in 3D space
+    target_points = np.random.uniform(-1, 1, (10000, 3))  # 100 random points in 3D space
     target_cloud.points = o3d.utility.Vector3dVector(target_points)
 
     # Generate a random source point cloud by applying a slight transformation to the target
@@ -14,7 +16,7 @@ def create_sample_point_clouds():
                                [-0.0080757, 0.1743097, 0.9846578 , 0.01],     # Translate 0
                                [0, 0, 0, 1]])      
 
-    source_points = np.dot(np.hstack((target_points, np.ones((200, 1)))), transformation.T)[:, :3]
+    source_points = np.dot(np.hstack((target_points, np.ones((10000, 1)))), transformation.T)[:, :3]
     source_cloud.points = o3d.utility.Vector3dVector(source_points)
 
     return target_cloud, source_cloud
@@ -43,6 +45,13 @@ if __name__ == "__main__":
     gicp = GICP()
     gicp.set_source(source_cloud)
     gicp.set_target(target_cloud)
-    print(gicp.compute_transformation(np.eye(4,4)))
-    print(transformation)
+
+    res = gicp.compute_transformation(np.eye(4,4))
+    res = np.linalg.inv(res)
+    rot = R.from_matrix(res[:3, :3]).as_euler("ZYX")
+    print(f"computed transformation {rot}, {res[:3, 3]}")
+    print("\n")
+    rot = R.from_matrix(transformation[:3, :3]).as_euler("ZYX")
+    print(f"ground truth transformation {rot}, {transformation[:3, 3]}")
+
 

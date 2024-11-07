@@ -111,15 +111,17 @@ class GICP():
         # 50 iterations to solve
         for i in range(50):
             sum_of_errors, H, b = self.linearize(guess)
-            print(sum_of_errors)
             #eigenvalues = np.linalg.eigvals(H)
-            #print(eigenvalues)
-            epsilon = 1e-7  # Regularization factor
-            H_reg = H + np.eye(H.shape[0]) * epsilon
-            #L = cholesky(H_reg, lower=True)  # LDLT decomposition: H = L * L.T
-            #d = solve(L.T, solve(L, -b))  # First solve L * y = -b, then L.T * d = y
-            d = np.linalg.solve(H, -b.T)
-            guess = guess @ se3_exp(d)
-            print(guess)
+            if sum_of_errors > 0.000000001:
+                #print(eigenvalues)
+                epsilon = 1e-7  # Regularization factor
+                H_reg = H + np.eye(H.shape[0]) * epsilon
+                #L = cholesky(H_reg, lower=True)  # LDLT decomposition: H = L * L.T
+                #d = solve(L.T, solve(L, -b))  # First solve L * y = -b, then L.T * d = y
+                d = np.linalg.solve(H, -b.T)
+                guess = guess @ se3_exp(d)
+            else: 
+                print("registeration complete")
+                break
 
         return guess
