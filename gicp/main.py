@@ -6,7 +6,7 @@ from scipy.spatial.transform import Rotation as R
 def create_sample_point_clouds():
     # Generate a random target point cloud
     target_cloud = o3d.geometry.PointCloud()
-    target_points = np.random.uniform(-1, 1, (10000, 3))  # 100 random points in 3D space
+    target_points = np.random.uniform(-1, 1, (1000, 3))  # 100 random points in 3D space
     target_cloud.points = o3d.utility.Vector3dVector(target_points)
 
     # Generate a random source point cloud by applying a slight transformation to the target
@@ -16,7 +16,7 @@ def create_sample_point_clouds():
                                [-0.0080757, 0.1743097, 0.9846578 , 0.01],     # Translate 0
                                [0, 0, 0, 1]])      
 
-    source_points = np.dot(np.hstack((target_points, np.ones((10000, 1)))), transformation.T)[:, :3]
+    source_points = np.dot(np.hstack((target_points, np.ones((1000, 1)))), transformation.T)[:, :3]
     source_cloud.points = o3d.utility.Vector3dVector(source_points)
 
     return target_cloud, source_cloud

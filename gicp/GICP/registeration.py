@@ -4,8 +4,50 @@ import open3d as o3d
 import sys
 from .utils import skewd, se3_exp
 from scipy.linalg import cholesky, solve
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 lm_init_lambda_factor_ = 1e-9
+
+def linearize_point(i, x, source_points, correspondences, source_cov, target_points, target_cov, mahalanobis):
+    target_idx = correspondences[i]
+    if target_idx < 0:
+        return None  # Skip if no valid correspondence
+    
+    a = source_points[i]
+    # cov_a = source_cov[i]
+    b_mean = target_points[target_idx]
+   # cov_b = target_cov[target_idx]
+    trans_a = x @ np.append(a, 1)
+    error = np.append(b_mean, 1) - trans_a
+    error_term = error.T @ mahalanobis[i] @ error
+    
+    dtdx0 = np.zeros((4, 6))
+    dtdx0[:3, :3] = skewd(trans_a[:3])
+    dtdx0[:3, 3:] = -np.eye(3)
+    
+    H_local = dtdx0.T @ mahalanobis[i] @ dtdx0
+    b_local = dtdx0.T @ mahalanobis[i] @ error
+    
+    return error_term, H_local, b_local.T
+
+def update_correspondence_point(i, x, source_points, source_cov, kdtree, corr_dist_threshold, target_cov):
+    trans_p = x @ np.append(source_points[i], 1)
+    _, idx, d = kdtree.search_knn_vector_3d(trans_p[:3], 1)
+    sq_distance = d[0]
+    correspondence = idx[0] if d[0] < corr_dist_threshold ** 2 else -1
+
+    if correspondence < 0:
+        return sq_distance, correspondence, np.zeros((4, 4))  # No valid correspondence
+
+    # Mahalanobis calculation
+    cov_A = source_cov[i]
+    cov_B = target_cov[correspondence]
+    rcr = cov_B @ x @ cov_A @ x.T
+    rcr[3, 3] = 1.0
+    mahalanobis = np.linalg.inv(rcr)
+    mahalanobis[3, 3] = 0.0
+
+    return sq_distance, correspondence, mahalanobis
 
 class GICP():
     def __init__(self) -> None:
@@ -17,7 +59,7 @@ class GICP():
         self.sq_distance = None
         self.mahalanobis = None
         self.kdtree = None
-        self.corr_dist_threshold = 20
+        self.corr_dist_threshold = 400
 
     def covariance(self, cloud, cov):
         """
@@ -104,13 +146,59 @@ class GICP():
                         
         return sum_of_errors, H, b
 
+
+    def update_correspondances_parallel(self, x):
+        self.correspondaces = np.zeros(len(self.source.points), dtype=int)
+        self.sq_distance = np.zeros(len(self.source.points))
+        self.mahalanobis = np.zeros((len(self.source.points), 4, 4))
+        
+        with ThreadPoolExecutor(max_workers=12) as executor:
+            futures = [
+                executor.submit(
+                    update_correspondence_point, i, x, self.source.points, self.source_cov, 
+                    self.kdtree, self.corr_dist_threshold, self.target_cov
+                )
+                for i in range(len(self.source.points))
+            ]
+            
+            for i, future in enumerate(as_completed(futures)):
+                sq_distance, correspondence, mahalanobis = future.result()
+                self.sq_distance[i] = sq_distance
+                self.correspondaces[i] = correspondence
+                self.mahalanobis[i] = mahalanobis
+
+    def linearize_parallel(self, x):
+        self.update_correspondances(x)
+        H = np.zeros((6, 6))
+        b = np.zeros((1, 6))
+        sum_of_errors = 0.0
+        
+        with ThreadPoolExecutor(max_workers=12) as executor:
+            futures = [
+                executor.submit(
+                    linearize_point, i, x, self.source.points, self.correspondaces,
+                    self.source_cov, self.target.points, self.target_cov, self.mahalanobis
+                )
+                for i in range(len(self.source.points))
+            ]
+            
+            for future in as_completed(futures):
+                result = future.result()
+                if result is not None:
+                    error_term, H_local, b_local = result
+                    sum_of_errors += error_term
+                    H += H_local
+                    b += b_local
+
+        return sum_of_errors, H, b
+
     def compute_transformation(self, guess):
         self.source_cov = self.covariance(self.source, self.source_cov)
         self.target_cov = self.covariance(self.target, self.target_cov)
         sum_of_errors = 0.0
         # 50 iterations to solve
         for i in range(50):
-            sum_of_errors, H, b = self.linearize(guess)
+            sum_of_errors, H, b = self.linearize_parallel(guess)
             #eigenvalues = np.linalg.eigvals(H)
             if sum_of_errors > 0.000000001:
                 #print(eigenvalues)
